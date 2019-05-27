@@ -38,4 +38,7 @@ public:
     static string versionPath(){
         return "version";
     }
+    static string cpuInfo(){
+        return "cpuinfo";
+    }
 };
