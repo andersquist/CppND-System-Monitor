@@ -25,9 +25,11 @@ class ProcessParser{
 private:
     static vector<string> split(string line);
     static string getKey(const std::string& key, std::ifstream& stream, const int index = 1);
+    static string getLine(std::ifstream& stream, const std::string& default_value = "n/a");
+    static vector<string> getStatValues(string pid);
     std::ifstream stream;
 
-    public:
+public:
     static string getCmd(string pid);
     static vector<string> getPidList();
     static std::string getVmSize(string pid);
@@ -47,7 +49,6 @@ private:
     static bool isPidExisting(string pid);
 };
 
-// TODO: Define all of the above functions below:
 vector<string> ProcessParser::split(string line) {
     istringstream buffer(line);
     istream_iterator<string> beg(buffer), end;
@@ -58,19 +59,29 @@ string ProcessParser::getKey(const std::string& key, std::ifstream& stream, cons
     string line;
     while (getline(stream, line)) {
         if (line.find(key) == 0)
-            return split(line)[index];
+            return ProcessParser::split(line)[index];
     }
     return "n/a";
 }
 
+string ProcessParser::getLine(std::ifstream &stream, const std::string& default_value) {
+    string line;
+    if (getline(stream, line))
+        return line;
+    return default_value;
+}
 
 string ProcessParser::getCmd(string pid) {
     std::ifstream cmd_stream;
-    string cmdline;
     Util::getStream(Path::basePath() + pid + Path::cmdPath(), cmd_stream);
-    if ( getline(cmd_stream, cmdline) )
-        return cmdline;
-    return "n/a";
+    return ProcessParser::getLine(cmd_stream);
+}
+
+vector<string> ProcessParser::getStatValues(string pid) {
+    std::ifstream stream;
+    Util::getStream(Path::basePath() + pid + Path::statPath(), stream);
+    auto line = ProcessParser::getLine(stream);
+    return ProcessParser::split(line);
 }
 
 vector<string> ProcessParser::getPidList() {
@@ -100,11 +111,57 @@ vector<string> ProcessParser::getPidList() {
 string ProcessParser::getVmSize(string pid) {
     std::ifstream stream;
     Util::getStream(Path::basePath() + pid + Path::statusPath(), stream);
-    return std::to_string(stof(getKey("VmSize", stream)) / 1024);
+    return std::to_string(stof(ProcessParser::getKey("VmSize", stream)) / 1024);
 }
 
 int ProcessParser::getNumberOfCores() {
     std::ifstream stream;
     Util::getStream(Path::basePath() + Path::cpuInfo(), stream);
-    return stoi(getKey("cpu cores", stream, 3));
+    return stoi(ProcessParser::getKey("cpu cores", stream, 3));
+}
+
+std::string ProcessParser::getCpuPercent(string pid) {
+    auto values = ProcessParser::getStatValues(pid);
+    float utime = stof(ProcessParser::getProcUpTime(pid));
+    float stime = stof(values[14]);
+    float cutime = stof(values[15]);
+    float cstime = stof(values[16]);
+    float starttime = stof(values[21]);
+    float uptime = ProcessParser::getSysUpTime();
+    float freq = sysconf(_SC_CLK_TCK);
+    float total_time = utime + stime + cutime + cstime;
+    float seconds = uptime - (starttime / freq);
+    float result = 100.0 * ((total_time/freq)/seconds);
+    return std::to_string(result);
+}
+
+std::string ProcessParser::getProcUpTime(string pid) {
+    auto values = ProcessParser::getStatValues(pid);
+    return std::to_string(stof(values[13]) / sysconf(_SC_CLK_TCK) );
+}
+
+long int ProcessParser::getSysUpTime() {
+    std::ifstream uptime_stream;
+    Util::getStream(Path::basePath() + Path::upTimePath(), uptime_stream);
+    auto values = ProcessParser::split(ProcessParser::getLine(uptime_stream));
+    return stoi(values[0]);
+}
+
+std::string ProcessParser::getProcUser(string pid) {
+    std::ifstream stream;
+    Util::getStream(Path::basePath() + pid + Path::statusPath(), stream);
+    auto user_id = ProcessParser::getKey("Uid", stream);
+
+    std::ifstream pass_stream;
+    std::string line, find_str = "x:" + user_id + ":";
+    Util::getStream("/etc/passwd", pass_stream);
+
+    while (getline(pass_stream, line)) {
+        auto pos = line.find(find_str);
+        if (pos != std::string::npos) {
+            return line.substr(0, pos - 1);
+        }
+    }
+
+    return user_id;
 }
